@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Zammad Ticket Exporter</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+            color: #555;
+        }
+        input[type="text"] {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #ddd;
+            border-radius: 4px;
+            font-size: 16px;
+            box-sizing: border-box;
+        }
+        input[type="text"]:focus {
+            border-color: #007bff;
+            outline: none;
+        }
+        .button-group {
+            display: flex;
+            gap: 10px;
+            margin-top: 30px;
+        }
+        button {
+            flex: 1;
+            padding: 12px 20px;
+            font-size: 16px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+        .btn-json {
+            background-color: #28a745;
+            color: white;
+        }
+        .btn-json:hover {
+            background-color: #218838;
+        }
+        .btn-csv {
+            background-color: #007bff;
+            color: white;
+        }
+        .btn-csv:hover {
+            background-color: #0056b3;
+        }
+        button:disabled {
+            background-color: #6c757d;
+            cursor: not-allowed;
+        }
+        .progress-container {
+            display: none;
+            margin-top: 20px;
+        }
+        .progress-bar {
+            width: 100%;
+            height: 20px;
+            background-color: #e9ecef;
+            border-radius: 10px;
+            overflow: hidden;
+        }
+        .progress-fill {
+            height: 100%;
+            background-color: #007bff;
+            width: 0%;
+            transition: width 0.3s ease;
+        }
+        .progress-text {
+            text-align: center;
+            margin-top: 10px;
+            color: #666;
+        }
+        .alert {
+            padding: 12px;
+            margin-top: 20px;
+            border-radius: 4px;
+            display: none;
+        }
+        .alert-error {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        .alert-success {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Zammad Ticket Exporter</h1>
+        
+        <div class="form-group">
+            <label for="instanceName">Zammad Instance Name:</label>
+            <input type="text" id="instanceName" placeholder="myinstance (for https://myinstance.zammad.com)">
+        </div>
+        
+        <div class="form-group">
+            <label for="apiToken">API Token:</label>
+            <input type="text" id="apiToken" placeholder="Your Zammad API token">
+        </div>
+        
+        <div class="button-group">
+            <button class="btn-json" onclick="exportData('json')">Export JSON</button>
+            <button class="btn-csv" onclick="exportData('csv')">Export CSV</button>
+        </div>
+        
+        <div class="progress-container" id="progressContainer">
+            <div class="progress-bar">
+                <div class="progress-fill" id="progressFill"></div>
+            </div>
+            <div class="progress-text" id="progressText">Initializing...</div>
+        </div>
+        
+        <div class="alert alert-error" id="errorAlert"></div>
+        <div class="alert alert-success" id="successAlert"></div>
+    </div>
+
+    <script>
+        // Global variables for caching reference data
+        let users = new Map();
+        let groups = new Map();
+        let organizations = new Map();
+        let states = new Map();
+        let priorities = new Map();
+        let baseUrl = '';
+        let apiToken = '';
+
+        // Show/hide progress bar
+        function showProgress(show = true) {
+            const container = document.getElementById('progressContainer');
+            container.style.display = show ? 'block' : 'none';
+            if (!show) {
+                updateProgress(0, '');
+            }
+        }
+
+        // Update progress bar
+        function updateProgress(percentage, text) {
+            document.getElementById('progressFill').style.width = percentage + '%';
+            document.getElementById('progressText').textContent = text;
+        }
+
+        // Show alert messages
+        function showAlert(message, type = 'error') {
+            const errorAlert = document.getElementById('errorAlert');
+            const successAlert = document.getElementById('successAlert');
+            
+            // Hide both alerts first
+            errorAlert.style.display = 'none';
+            successAlert.style.display = 'none';
+            
+            if (type === 'error') {
+                errorAlert.textContent = message;
+                errorAlert.style.display = 'block';
+            } else {
+                successAlert.textContent = message;
+                successAlert.style.display = 'block';
+            }
+        }
+
+        // Make API request with CORS proxy
+        async function makeApiRequest(endpoint, options = {}) {
+            const originalUrl = `${baseUrl}/api/v1/${endpoint}`;
+            
+            try {
+                // Try with corsproxy.io first (supports custom headers)
+                const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(originalUrl)}`;
+                
+                const headers = {
+                    'Authorization': `Token token=${apiToken}`,
+                    'Content-Type': 'application/json',
+                    ...options.headers
+                };
+
+                const response = await fetch(proxyUrl, { 
+                    method: options.method || 'GET',
+                    headers: headers,
+                    body: options.body
+                });
+
+                if (!response.ok) {
+                    throw new Error(`Proxy Error: ${response.status} - ${response.statusText}`);
+                }
+
+                return await response.json();
+                
+            } catch (error) {
+                console.warn('corsproxy.io failed, trying thingproxy:', error);
+                
+                // Fallback to thingproxy (GET only, but works well)
+                try {
+                    const thingproxyUrl = `https://thingproxy.freeboard.io/fetch/${originalUrl}`;
+                    
+                    // For thingproxy, we need to add auth as query parameter for GET requests
+                    const urlWithAuth = `${originalUrl}?access_token=${apiToken}`;
+                    const finalUrl = `https://thingproxy.freeboard.io/fetch/${urlWithAuth}`;
+                    
+                    const response = await fetch(finalUrl);
+                    
+                    if (!response.ok) {
+                        throw new Error(`ThingProxy Error: ${response.status}`);
+                    }
+                    
+                    return await response.json();
+                    
+                } catch (thingproxyError) {
+                    console.warn('ThingProxy also failed:', thingproxyError);
+                    throw new Error(`All CORS proxies failed. Original error: ${error.message}`);
+                }
+            }
+        }
+
+        // Load all reference data (users, groups, etc.)
+        async function loadReferenceData() {
+            updateProgress(10, 'Loading users...');
+            const usersData = await makeApiRequest('users');
+            usersData.forEach(user => users.set(user.id, user));
+
+            updateProgress(20, 'Loading groups...');
+            const groupsData = await makeApiRequest('groups');
+            groupsData.forEach(group => groups.set(group.id, group));
+
+            updateProgress(30, 'Loading organizations...');
+            const orgsData = await makeApiRequest('organizations');
+            orgsData.forEach(org => organizations.set(org.id, org));
+
+            updateProgress(40, 'Loading ticket states...');
+            const statesData = await makeApiRequest('ticket_states');
+            statesData.forEach(state => states.set(state.id, state));
+
+            updateProgress(50, 'Loading ticket priorities...');
+            const prioritiesData = await makeApiRequest('ticket_priorities');
+            prioritiesData.forEach(priority => priorities.set(priority.id, priority));
+        }
+
+        // Get all tickets with pagination
+        async function getAllTickets() {
+            let allTickets = [];
+            let page = 1;
+            let hasMorePages = true;
+
+            while (hasMorePages) {
+                updateProgress(50 + (page * 5), `Loading tickets page ${page}...`);
+                
+                const response = await makeApiRequest(`tickets?page=${page}&per_page=100&expand=true`);
+                
+                if (response && response.length > 0) {
+                    allTickets = allTickets.concat(response);
+                    page++;
+                    // Zammad returns less than per_page when it's the last page
+                    hasMorePages = response.length === 100;
+                } else {
+                    hasMorePages = false;
+                }
+            }
+
+            return allTickets;
+        }
+
+
+
+        // Check if ticket has spam tag
+        function hasSpamTag(ticket) {
+            return ticket.tags && ticket.tags.includes('spam');
+        }
+
+        // Enrich ticket data with references
+        async function enrichTicket(ticket, index, total) {
+            if (hasSpamTag(ticket)) {
+                return null; // Skip tickets with spam tag
+            }
+
+            updateProgress(80 + (index / total * 15), `Enriching ticket ${index + 1}/${total}...`);
+
+            return {
+                id: ticket.id,
+                number: ticket.number,
+                title: ticket.title,
+                state: states.get(ticket.state_id)?.name || 'Unknown',
+                priority: priorities.get(ticket.priority_id)?.name || 'Unknown',
+                group: groups.get(ticket.group_id)?.name || 'Unknown',
+                customer: {
+                    id: ticket.customer_id,
+                    name: users.get(ticket.customer_id)?.firstname + ' ' + users.get(ticket.customer_id)?.lastname || 'Unknown',
+                    email: users.get(ticket.customer_id)?.email || 'Unknown',
+                    organization: organizations.get(users.get(ticket.customer_id)?.organization_id)?.name || 'None'
+                },
+                owner: {
+                    id: ticket.owner_id,
+                    name: users.get(ticket.owner_id)?.firstname + ' ' + users.get(ticket.owner_id)?.lastname || 'Unassigned',
+                    email: users.get(ticket.owner_id)?.email || 'Unknown'
+                },
+                created_at: ticket.created_at,
+                updated_at: ticket.updated_at,
+                close_at: ticket.close_at,
+                // Custom fields
+                projectcategory: ticket.projectcategory || '',
+                terminal: ticket.terminal || '',
+                requesttype: ticket.requesttype || '',
+                interventiontype: ticket.interventiontype || '',
+                service: ticket.service || '',
+                platform: ticket.platform || '',
+                requestedby: ticket.requestedby || ''
+            };
+        }
+
+        // Convert enriched tickets to JSON
+        function exportToJSON(tickets) {
+            const dataStr = JSON.stringify(tickets, null, 2);
+            const dataBlob = new Blob([dataStr], { type: 'application/json' });
+            const url = URL.createObjectURL(dataBlob);
+            
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `zammad_tickets_${new Date().toISOString().split('T')[0]}.json`;
+            link.click();
+            
+            URL.revokeObjectURL(url);
+        }
+
+        // Convert enriched tickets to CSV
+        function exportToCSV(tickets) {
+            if (tickets.length === 0) {
+                throw new Error('No tickets to export');
+            }
+
+            const headers = [
+                'ID', 'Number', 'Title', 'State', 'Priority', 'Group',
+                'Customer Name', 'Customer Email', 'Customer Organization',
+                'Owner Name', 'Owner Email',
+                'Created At', 'Updated At', 'Close At',
+                'Project Category', 'Terminal', 'Request Type', 'Intervention Type',
+                'Service', 'Platform', 'Requested By'
+            ];
+
+            const csvContent = [
+                headers.join(','),
+                ...tickets.map(ticket => [
+                    ticket.id,
+                    `"${ticket.number}"`,
+                    `"${(ticket.title || '').replace(/"/g, '""')}"`,
+                    `"${ticket.state}"`,
+                    `"${ticket.priority}"`,
+                    `"${ticket.group}"`,
+                    `"${ticket.customer.name}"`,
+                    `"${ticket.customer.email}"`,
+                    `"${ticket.customer.organization}"`,
+                    `"${ticket.owner.name}"`,
+                    `"${ticket.owner.email}"`,
+                    `"${ticket.created_at || ''}"`,
+                    `"${ticket.updated_at || ''}"`,
+                    `"${ticket.close_at || ''}"`,
+                    `"${ticket.projectcategory}"`,
+                    `"${ticket.terminal}"`,
+                    `"${ticket.requesttype}"`,
+                    `"${ticket.interventiontype}"`,
+                    `"${ticket.service}"`,
+                    `"${ticket.platform}"`,
+                    `"${ticket.requestedby}"`
+                ].join(','))
+            ].join('\n');
+
+            // Create CSV with UTF-8 BOM for proper encoding
+            const BOM = '\uFEFF';
+            const dataBlob = new Blob([BOM + csvContent], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(dataBlob);
+            
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `zammad_tickets_${new Date().toISOString().split('T')[0]}.csv`;
+            link.click();
+            
+            URL.revokeObjectURL(url);
+        }
+
+        // Main export function
+        async function exportData(format) {
+            // Clear previous alerts
+            document.getElementById('errorAlert').style.display = 'none';
+            document.getElementById('successAlert').style.display = 'none';
+
+            // Validate inputs
+            const instanceName = document.getElementById('instanceName').value.trim();
+            apiToken = document.getElementById('apiToken').value.trim();
+
+            if (!instanceName || !apiToken) {
+                showAlert('Please provide both instance name and API token');
+                return;
+            }
+
+            baseUrl = `https://${instanceName}.zammad.com`;
+
+            // Disable buttons during export
+            const buttons = document.querySelectorAll('button');
+            buttons.forEach(btn => btn.disabled = true);
+
+            try {
+                showProgress(true);
+                updateProgress(0, 'Starting export...');
+
+                // Clear caches
+                users.clear();
+                groups.clear();
+                organizations.clear();
+                states.clear();
+                priorities.clear();
+
+                // Load reference data
+                await loadReferenceData();
+
+                // Get all tickets
+                updateProgress(60, 'Loading tickets...');
+                const rawTickets = await getAllTickets();
+
+                // Enrich tickets with detailed information
+                updateProgress(75, 'Enriching ticket data...');
+                const enrichedTickets = [];
+                
+                for (let i = 0; i < rawTickets.length; i++) {
+                    const enriched = await enrichTicket(rawTickets[i], i, rawTickets.length);
+                    if (enriched) { // Only add non-spam tickets
+                        enrichedTickets.push(enriched);
+                    }
+                }
+
+                updateProgress(95, 'Preparing download...');
+
+                // Export in requested format
+                if (format === 'json') {
+                    exportToJSON(enrichedTickets);
+                } else {
+                    exportToCSV(enrichedTickets);
+                }
+
+                updateProgress(100, 'Export completed!');
+                showAlert(`Successfully exported ${enrichedTickets.length} tickets (${rawTickets.length - enrichedTickets.length} spam tickets excluded)`, 'success');
+
+            } catch (error) {
+                console.error('Export error:', error);
+                showAlert(`Export failed: ${error.message}`);
+            } finally {
+                // Re-enable buttons
+                buttons.forEach(btn => btn.disabled = false);
+                setTimeout(() => showProgress(false), 2000);
+            }
+        }
+    </script>
+</body>
+</html>
