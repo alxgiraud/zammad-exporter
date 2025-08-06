@@ -189,56 +189,27 @@
             }
         }
 
-        // Make API request with CORS proxy
+        // Make API request directly
         async function makeApiRequest(endpoint, options = {}) {
-            const originalUrl = `${baseUrl}/api/v1/${endpoint}`;
+            const url = `${baseUrl}/api/v1/${endpoint}`;
             
-            try {
-                // Try with corsproxy.io first (supports custom headers)
-                const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(originalUrl)}`;
-                
-                const headers = {
-                    'Authorization': `Token token=${apiToken}`,
-                    'Content-Type': 'application/json',
-                    ...options.headers
-                };
+            const headers = {
+                'Authorization': `Token token=${apiToken}`,
+                'Content-Type': 'application/json',
+                ...options.headers
+            };
 
-                const response = await fetch(proxyUrl, { 
-                    method: options.method || 'GET',
-                    headers: headers,
-                    body: options.body
-                });
+            const response = await fetch(url, { 
+                method: options.method || 'GET',
+                headers: headers,
+                body: options.body
+            });
 
-                if (!response.ok) {
-                    throw new Error(`Proxy Error: ${response.status} - ${response.statusText}`);
-                }
-
-                return await response.json();
-                
-            } catch (error) {
-                console.warn('corsproxy.io failed, trying thingproxy:', error);
-                
-                // Fallback to thingproxy (GET only, but works well)
-                try {
-                    const thingproxyUrl = `https://thingproxy.freeboard.io/fetch/${originalUrl}`;
-                    
-                    // For thingproxy, we need to add auth as query parameter for GET requests
-                    const urlWithAuth = `${originalUrl}?access_token=${apiToken}`;
-                    const finalUrl = `https://thingproxy.freeboard.io/fetch/${urlWithAuth}`;
-                    
-                    const response = await fetch(finalUrl);
-                    
-                    if (!response.ok) {
-                        throw new Error(`ThingProxy Error: ${response.status}`);
-                    }
-                    
-                    return await response.json();
-                    
-                } catch (thingproxyError) {
-                    console.warn('ThingProxy also failed:', thingproxyError);
-                    throw new Error(`All CORS proxies failed. Original error: ${error.message}`);
-                }
+            if (!response.ok) {
+                throw new Error(`API Error: ${response.status} - ${response.statusText}`);
             }
+
+            return await response.json();
         }
 
         // Load all reference data (users, groups, etc.)
@@ -287,8 +258,6 @@
 
             return allTickets;
         }
-
-
 
         // Check if ticket has spam tag
         function hasSpamTag(ticket) {
