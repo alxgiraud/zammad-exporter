@@ -193,25 +193,41 @@
             return await response.json();
         }
 
+        // Get ticket tags
+        async function getTicketTags(ticketId) {
+            try {
+                const response = await makeApiRequest(`tags?object=Ticket&o_id=${ticketId}`);
+                return response.tags || [];
+            } catch (error) {
+                console.warn(`Failed to get tags for ticket ${ticketId}:`, error);
+                return [];
+            }
+        }
+
+        // Check if ticket has spam tag
+        function hasSpamTag(tags) {
+            return tags && tags.includes('spam');
+        }
+
         // Load all reference data (users, groups, etc.)
         async function loadReferenceData() {
             updateProgress(10, 'Loading users...');
             const usersData = await makeApiRequest('users');
             usersData.forEach(user => users.set(user.id, user));
 
-            updateProgress(20, 'Loading groups...');
+            updateProgress(15, 'Loading groups...');
             const groupsData = await makeApiRequest('groups');
             groupsData.forEach(group => groups.set(group.id, group));
 
-            updateProgress(30, 'Loading organizations...');
+            updateProgress(20, 'Loading organizations...');
             const orgsData = await makeApiRequest('organizations');
             orgsData.forEach(org => organizations.set(org.id, org));
 
-            updateProgress(40, 'Loading ticket states...');
+            updateProgress(25, 'Loading ticket states...');
             const statesData = await makeApiRequest('ticket_states');
             statesData.forEach(state => states.set(state.id, state));
 
-            updateProgress(50, 'Loading ticket priorities...');
+            updateProgress(30, 'Loading ticket priorities...');
             const prioritiesData = await makeApiRequest('ticket_priorities');
             prioritiesData.forEach(priority => priorities.set(priority.id, priority));
         }
@@ -223,7 +239,7 @@
             let hasMorePages = true;
 
             while (hasMorePages) {
-                updateProgress(50 + (page * 5), `Loading tickets page ${page}...`);
+                updateProgress(30 + (page * 3), `Loading tickets page ${page}...`);
                 
                 const response = await makeApiRequest(`tickets?page=${page}&per_page=100&expand=true`);
                 
@@ -240,18 +256,35 @@
             return allTickets;
         }
 
-        // Check if ticket has spam tag
-        function hasSpamTag(ticket) {
-            return ticket.tags && ticket.tags.includes('spam');
+        // Get user name by ID
+        function getUserName(userId) {
+            const user = users.get(userId);
+            if (!user) return 'Unknown';
+            return `${user.firstname || ''} ${user.lastname || ''}`.trim() || 'Unknown';
+        }
+
+        // Get user email by ID
+        function getUserEmail(userId) {
+            const user = users.get(userId);
+            return user?.email || 'Unknown';
         }
 
         // Enrich ticket data with references
         async function enrichTicket(ticket, index, total) {
-            if (hasSpamTag(ticket)) {
+            const progressBase = 50;
+            const progressRange = 40;
+            const currentProgress = progressBase + (index / total * progressRange);
+            
+            updateProgress(currentProgress, `Processing ticket ${index + 1}/${total} - Getting tags...`);
+            
+            // Get ticket tags
+            const tags = await getTicketTags(ticket.id);
+            
+            if (hasSpamTag(tags)) {
                 return null; // Skip tickets with spam tag
             }
 
-            updateProgress(80 + (index / total * 15), `Enriching ticket ${index + 1}/${total}...`);
+            updateProgress(currentProgress + 0.5, `Processing ticket ${index + 1}/${total} - Enriching data...`);
 
             return {
                 id: ticket.id,
@@ -262,26 +295,67 @@
                 group: groups.get(ticket.group_id)?.name || 'Unknown',
                 customer: {
                     id: ticket.customer_id,
-                    name: users.get(ticket.customer_id)?.firstname + ' ' + users.get(ticket.customer_id)?.lastname || 'Unknown',
-                    email: users.get(ticket.customer_id)?.email || 'Unknown',
+                    name: getUserName(ticket.customer_id),
+                    email: getUserEmail(ticket.customer_id),
                     organization: organizations.get(users.get(ticket.customer_id)?.organization_id)?.name || 'None'
                 },
                 owner: {
                     id: ticket.owner_id,
-                    name: users.get(ticket.owner_id)?.firstname + ' ' + users.get(ticket.owner_id)?.lastname || 'Unassigned',
-                    email: users.get(ticket.owner_id)?.email || 'Unknown'
+                    name: ticket.owner_id ? getUserName(ticket.owner_id) : 'Unassigned',
+                    email: ticket.owner_id ? getUserEmail(ticket.owner_id) : 'Unknown'
                 },
                 created_at: ticket.created_at,
                 updated_at: ticket.updated_at,
+                created_by: getUserName(ticket.created_by_id),
+                updated_by: getUserName(ticket.updated_by_id),
                 close_at: ticket.close_at,
-                // Custom fields
+                last_close_at: ticket.last_close_at,
+                
+                // Response times
+                first_response_at: ticket.first_response_at,
+                first_response_escalation_at: ticket.first_response_escalation_at,
+                first_response_in_min: ticket.first_response_in_min,
+                first_response_diff_in_min: ticket.first_response_diff_in_min,
+                
+                // Close times
+                close_escalation_at: ticket.close_escalation_at,
+                close_in_min: ticket.close_in_min,
+                close_diff_in_min: ticket.close_diff_in_min,
+                
+                // Update times
+                update_escalation_at: ticket.update_escalation_at,
+                update_in_min: ticket.update_in_min,
+                update_diff_in_min: ticket.update_diff_in_min,
+                
+                // Contact information
+                last_contact_at: ticket.last_contact_at,
+                last_contact_agent_at: ticket.last_contact_agent_at,
+                last_contact_customer_at: ticket.last_contact_customer_at,
+                last_owner_update_at: ticket.last_owner_update_at,
+                
+                // Article information
+                create_article_type_id: ticket.create_article_type_id,
+                create_article_sender_id: ticket.create_article_sender_id,
+                article_count: ticket.article_count,
+                
+                // Other fields
+                escalation_at: ticket.escalation_at,
+                pending_time: ticket.pending_time,
+                type: ticket.type,
+                time_unit: ticket.time_unit,
+                note: ticket.note,
+                
+                // Custom fields (corrected typo)
                 projectcategory: ticket.projectcategory || '',
                 terminal: ticket.terminal || '',
                 requesttype: ticket.requesttype || '',
                 interventiontype: ticket.interventiontype || '',
                 service: ticket.service || '',
                 platform: ticket.platform || '',
-                requestedby: ticket.requestedby || ''
+                requestedby: ticket.requestedby || '', // Corrected from requesetedby
+                
+                // Tags
+                tags: tags.join(', ')
             };
         }
 
@@ -295,9 +369,16 @@
                 'ID', 'Number', 'Title', 'State', 'Priority', 'Group',
                 'Customer Name', 'Customer Email', 'Customer Organization',
                 'Owner Name', 'Owner Email',
-                'Created At', 'Updated At', 'Close At',
+                'Created At', 'Updated At', 'Created By', 'Updated By',
+                'Close At', 'Last Close At',
+                'First Response At', 'First Response Escalation At', 'First Response In Min', 'First Response Diff In Min',
+                'Close Escalation At', 'Close In Min', 'Close Diff In Min',
+                'Update Escalation At', 'Update In Min', 'Update Diff In Min',
+                'Last Contact At', 'Last Contact Agent At', 'Last Contact Customer At', 'Last Owner Update At',
+                'Create Article Type ID', 'Create Article Sender ID', 'Article Count',
+                'Escalation At', 'Pending Time', 'Type', 'Time Unit', 'Note',
                 'Project Category', 'Terminal', 'Request Type', 'Intervention Type',
-                'Service', 'Platform', 'Requested By'
+                'Service', 'Platform', 'Requested By', 'Tags'
             ];
 
             const csvContent = [
@@ -316,14 +397,40 @@
                     `"${ticket.owner.email}"`,
                     `"${ticket.created_at || ''}"`,
                     `"${ticket.updated_at || ''}"`,
+                    `"${ticket.created_by}"`,
+                    `"${ticket.updated_by}"`,
                     `"${ticket.close_at || ''}"`,
+                    `"${ticket.last_close_at || ''}"`,
+                    `"${ticket.first_response_at || ''}"`,
+                    `"${ticket.first_response_escalation_at || ''}"`,
+                    `"${ticket.first_response_in_min || ''}"`,
+                    `"${ticket.first_response_diff_in_min || ''}"`,
+                    `"${ticket.close_escalation_at || ''}"`,
+                    `"${ticket.close_in_min || ''}"`,
+                    `"${ticket.close_diff_in_min || ''}"`,
+                    `"${ticket.update_escalation_at || ''}"`,
+                    `"${ticket.update_in_min || ''}"`,
+                    `"${ticket.update_diff_in_min || ''}"`,
+                    `"${ticket.last_contact_at || ''}"`,
+                    `"${ticket.last_contact_agent_at || ''}"`,
+                    `"${ticket.last_contact_customer_at || ''}"`,
+                    `"${ticket.last_owner_update_at || ''}"`,
+                    `"${ticket.create_article_type_id || ''}"`,
+                    `"${ticket.create_article_sender_id || ''}"`,
+                    `"${ticket.article_count || ''}"`,
+                    `"${ticket.escalation_at || ''}"`,
+                    `"${ticket.pending_time || ''}"`,
+                    `"${ticket.type || ''}"`,
+                    `"${ticket.time_unit || ''}"`,
+                    `"${(ticket.note || '').replace(/"/g, '""')}"`,
                     `"${ticket.projectcategory}"`,
                     `"${ticket.terminal}"`,
                     `"${ticket.requesttype}"`,
                     `"${ticket.interventiontype}"`,
                     `"${ticket.service}"`,
                     `"${ticket.platform}"`,
-                    `"${ticket.requestedby}"`
+                    `"${ticket.requestedby}"`,
+                    `"${ticket.tags}"`
                 ].join(','))
             ].join('\n');
 
@@ -376,11 +483,11 @@
                 await loadReferenceData();
 
                 // Get all tickets
-                updateProgress(60, 'Loading tickets...');
+                updateProgress(35, 'Loading tickets...');
                 const rawTickets = await getAllTickets();
 
-                // Enrich tickets with detailed information
-                updateProgress(75, 'Enriching ticket data...');
+                // Enrich tickets with detailed information (including tags check)
+                updateProgress(50, 'Enriching ticket data and checking tags...');
                 const enrichedTickets = [];
                 
                 for (let i = 0; i < rawTickets.length; i++) {
