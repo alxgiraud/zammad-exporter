@@ -189,27 +189,63 @@
             }
         }
 
-        // Make API request directly
+        // Make API request with multiple authentication methods
         async function makeApiRequest(endpoint, options = {}) {
-            const url = `${baseUrl}/api/v1/${endpoint}`;
+            // Try different authentication methods based on CORS limitations
             
-            const headers = {
-                'Authorization': `Token token=${apiToken}`,
-                'Content-Type': 'application/json',
-                ...options.headers
-            };
+            // Method 1: Try with Authorization header (works when CORS is properly configured)
+            try {
+                const url = `${baseUrl}/api/v1/${endpoint}`;
+                const headers = {
+                    'Authorization': `Token token=${apiToken}`,
+                    'Content-Type': 'application/json',
+                    ...options.headers
+                };
 
-            const response = await fetch(url, { 
-                method: options.method || 'GET',
-                headers: headers,
-                body: options.body
-            });
+                const response = await fetch(url, { 
+                    method: options.method || 'GET',
+                    headers: headers,
+                    body: options.body
+                });
 
-            if (!response.ok) {
-                throw new Error(`API Error: ${response.status} - ${response.statusText}`);
+                if (!response.ok) {
+                    throw new Error(`API Error: ${response.status} - ${response.statusText}`);
+                }
+
+                return await response.json();
+                
+            } catch (error) {
+                console.warn('Authorization header blocked by CORS, trying query parameter method:', error.message);
+                
+                // Method 2: Try with token as query parameter (fallback for CORS issues)
+                try {
+                    const separator = endpoint.includes('?') ? '&' : '?';
+                    const urlWithToken = `${baseUrl}/api/v1/${endpoint}${separator}token=${apiToken}`;
+                    
+                    const headers = {
+                        'Content-Type': 'application/json',
+                        ...options.headers
+                    };
+                    
+                    // Remove Authorization header to avoid CORS preflight
+                    delete headers.Authorization;
+
+                    const response = await fetch(urlWithToken, { 
+                        method: options.method || 'GET',
+                        headers: headers,
+                        body: options.body
+                    });
+
+                    if (!response.ok) {
+                        throw new Error(`API Error: ${response.status} - ${response.statusText}`);
+                    }
+
+                    return await response.json();
+                    
+                } catch (tokenError) {
+                    throw new Error(`Both authentication methods failed. Original error: ${error.message}. Token method error: ${tokenError.message}`);
+                }
             }
-
-            return await response.json();
         }
 
         // Load all reference data (users, groups, etc.)
