@@ -44,32 +44,19 @@
             border-color: #007bff;
             outline: none;
         }
-        .button-group {
-            display: flex;
-            gap: 10px;
-            margin-top: 30px;
-        }
         button {
-            flex: 1;
+            width: 100%;
             padding: 12px 20px;
             font-size: 16px;
             border: none;
             border-radius: 4px;
             cursor: pointer;
             transition: background-color 0.3s;
-        }
-        .btn-json {
-            background-color: #28a745;
-            color: white;
-        }
-        .btn-json:hover {
-            background-color: #218838;
-        }
-        .btn-csv {
             background-color: #007bff;
             color: white;
+            margin-top: 30px;
         }
-        .btn-csv:hover {
+        button:hover {
             background-color: #0056b3;
         }
         button:disabled {
@@ -130,10 +117,7 @@
             <input type="text" id="apiToken" placeholder="Your Zammad API token">
         </div>
         
-        <div class="button-group">
-            <button class="btn-json" onclick="exportData('json')">Export JSON</button>
-            <button class="btn-csv" onclick="exportData('csv')">Export CSV</button>
-        </div>
+        <button onclick="exportData()">Export CSV</button>
         
         <div class="progress-container" id="progressContainer">
             <div class="progress-bar">
@@ -189,63 +173,25 @@
             }
         }
 
-        // Make API request with multiple authentication methods
-        async function makeApiRequest(endpoint, options = {}) {
-            // Try different authentication methods based on CORS limitations
+        // Make API request via AllOrigins proxy
+        async function makeApiRequest(endpoint) {
+            const separator = endpoint.includes('?') ? '&' : '?';
+            const targetUrl = `${baseUrl}/api/v1/${endpoint}${separator}token=${apiToken}`;
+            const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(targetUrl)}`;
             
-            // Method 1: Try with Authorization header (works when CORS is properly configured)
-            try {
-                const url = `${baseUrl}/api/v1/${endpoint}`;
-                const headers = {
-                    'Authorization': `Token token=${apiToken}`,
-                    'Content-Type': 'application/json',
-                    ...options.headers
-                };
+            const response = await fetch(proxyUrl);
 
-                const response = await fetch(url, { 
-                    method: options.method || 'GET',
-                    headers: headers,
-                    body: options.body
-                });
-
-                if (!response.ok) {
-                    throw new Error(`API Error: ${response.status} - ${response.statusText}`);
-                }
-
-                return await response.json();
-                
-            } catch (error) {
-                console.warn('Authorization header blocked by CORS, trying query parameter method:', error.message);
-                
-                // Method 2: Try with token as query parameter (fallback for CORS issues)
-                try {
-                    const separator = endpoint.includes('?') ? '&' : '?';
-                    const urlWithToken = `${baseUrl}/api/v1/${endpoint}${separator}token=${apiToken}`;
-                    
-                    const headers = {
-                        'Content-Type': 'application/json',
-                        ...options.headers
-                    };
-                    
-                    // Remove Authorization header to avoid CORS preflight
-                    delete headers.Authorization;
-
-                    const response = await fetch(urlWithToken, { 
-                        method: options.method || 'GET',
-                        headers: headers,
-                        body: options.body
-                    });
-
-                    if (!response.ok) {
-                        throw new Error(`API Error: ${response.status} - ${response.statusText}`);
-                    }
-
-                    return await response.json();
-                    
-                } catch (tokenError) {
-                    throw new Error(`Both authentication methods failed. Original error: ${error.message}. Token method error: ${tokenError.message}`);
-                }
+            if (!response.ok) {
+                throw new Error(`Proxy Error: ${response.status} - ${response.statusText}`);
             }
+
+            const data = await response.json();
+            
+            if (!data.contents) {
+                throw new Error('No data returned from proxy');
+            }
+
+            return JSON.parse(data.contents);
         }
 
         // Load all reference data (users, groups, etc.)
@@ -340,20 +286,6 @@
             };
         }
 
-        // Convert enriched tickets to JSON
-        function exportToJSON(tickets) {
-            const dataStr = JSON.stringify(tickets, null, 2);
-            const dataBlob = new Blob([dataStr], { type: 'application/json' });
-            const url = URL.createObjectURL(dataBlob);
-            
-            const link = document.createElement('a');
-            link.href = url;
-            link.download = `zammad_tickets_${new Date().toISOString().split('T')[0]}.json`;
-            link.click();
-            
-            URL.revokeObjectURL(url);
-        }
-
         // Convert enriched tickets to CSV
         function exportToCSV(tickets) {
             if (tickets.length === 0) {
@@ -410,7 +342,7 @@
         }
 
         // Main export function
-        async function exportData(format) {
+        async function exportData() {
             // Clear previous alerts
             document.getElementById('errorAlert').style.display = 'none';
             document.getElementById('successAlert').style.display = 'none';
@@ -426,9 +358,9 @@
 
             baseUrl = `https://${instanceName}.zammad.com`;
 
-            // Disable buttons during export
-            const buttons = document.querySelectorAll('button');
-            buttons.forEach(btn => btn.disabled = true);
+            // Disable button during export
+            const button = document.querySelector('button');
+            button.disabled = true;
 
             try {
                 showProgress(true);
@@ -461,12 +393,8 @@
 
                 updateProgress(95, 'Preparing download...');
 
-                // Export in requested format
-                if (format === 'json') {
-                    exportToJSON(enrichedTickets);
-                } else {
-                    exportToCSV(enrichedTickets);
-                }
+                // Export to CSV
+                exportToCSV(enrichedTickets);
 
                 updateProgress(100, 'Export completed!');
                 showAlert(`Successfully exported ${enrichedTickets.length} tickets (${rawTickets.length - enrichedTickets.length} spam tickets excluded)`, 'success');
@@ -475,8 +403,8 @@
                 console.error('Export error:', error);
                 showAlert(`Export failed: ${error.message}`);
             } finally {
-                // Re-enable buttons
-                buttons.forEach(btn => btn.disabled = false);
+                // Re-enable button
+                button.disabled = false;
                 setTimeout(() => showProgress(false), 2000);
             }
         }
