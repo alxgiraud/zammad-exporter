@@ -140,6 +140,21 @@
         let baseUrl = '';
         let apiToken = '';
 
+        // Static mappings for article types and senders
+        const senderMapping = {
+            1: 'Agent',
+            2: 'Customer', 
+            3: 'System'
+        };
+
+        const typeMapping = {
+            1: 'email',
+            2: 'sms',
+            3: 'chat',
+            4: 'fax',
+            5: 'web'
+        };
+
         // Show/hide progress bar
         function showProgress(show = true) {
             const container = document.getElementById('progressContainer');
@@ -269,6 +284,16 @@
             return user?.email || 'Unknown';
         }
 
+        // Get sender type name
+        function getSenderType(senderId) {
+            return senderMapping[senderId] || 'Unknown';
+        }
+
+        // Get article type name
+        function getArticleType(typeId) {
+            return typeMapping[typeId] || 'Unknown';
+        }
+
         // Enrich ticket data with references
         async function enrichTicket(ticket, index, total) {
             const progressBase = 50;
@@ -334,8 +359,8 @@
                 last_owner_update_at: ticket.last_owner_update_at,
                 
                 // Article information
-                create_article_type_id: ticket.create_article_type_id,
-                create_article_sender_id: ticket.create_article_sender_id,
+                first_article_type: getArticleType(ticket.create_article_type_id),
+                sender_type: getSenderType(ticket.create_article_sender_id),
                 article_count: ticket.article_count,
                 
                 // Other fields
@@ -375,7 +400,7 @@
                 'Close Escalation At', 'Close In Min', 'Close Diff In Min',
                 'Update Escalation At', 'Update In Min', 'Update Diff In Min',
                 'Last Contact At', 'Last Contact Agent At', 'Last Contact Customer At', 'Last Owner Update At',
-                'Create Article Type ID', 'Create Article Sender ID', 'Article Count',
+                'First Article Type', 'Sender Type', 'Article Count',
                 'Escalation At', 'Pending Time', 'Type', 'Time Unit', 'Note',
                 'Project Category', 'Terminal', 'Request Type', 'Intervention Type',
                 'Service', 'Platform', 'Requested By', 'Tags'
@@ -415,8 +440,8 @@
                     `"${ticket.last_contact_agent_at || ''}"`,
                     `"${ticket.last_contact_customer_at || ''}"`,
                     `"${ticket.last_owner_update_at || ''}"`,
-                    `"${ticket.create_article_type_id || ''}"`,
-                    `"${ticket.create_article_sender_id || ''}"`,
+                    `"${ticket.first_article_type}"`,
+                    `"${ticket.sender_type}"`,
                     `"${ticket.article_count || ''}"`,
                     `"${ticket.escalation_at || ''}"`,
                     `"${ticket.pending_time || ''}"`,
