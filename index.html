@@ -173,10 +173,10 @@
             }
         }
 
-        // Make API request via corsproxy.io with Authorization header
+        // Make API request via Cloudflare with Authorization header
         async function makeApiRequest(endpoint) {
             const targetUrl = `${baseUrl}/api/v1/${endpoint}`;
-            const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(targetUrl)}`;
+            const proxyUrl = `https://zammad.alexandre-giraud89.workers.dev/?url=${encodeURIComponent(targetUrl)}`;
             
             const response = await fetch(proxyUrl, {
                 method: 'GET',
